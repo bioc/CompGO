@@ -1,6 +1,224 @@
 # R pipeline for GO analysis and comparison
 # by Sam Bassett and Ash Waardenberg, VCCRI, 2014
 
+######################################
+### KEGG PATHWAY BEGINS 16/04/2014 ###
+######################################
+
+#' @title Compare KEGG pathways between two functional annotation charts
+#' @description viewKegg uses pathview to compare the gene lists visually by KEGG pathway.
+#' You can either supply a pathway id or the function will pick the most differentially 
+#' enriched pathway between the two inputs. As functional annotation charts don't have 
+#' differential gene expression information, a boolean scale is used - genes in the pathway
+#' are coloured green if from setA, yellow if from both, and red if from setB. We recommend
+#' you supply a working directory, as pathview will download an XML and PNG file as well
+#' as output an additional PNG of the pathway. 
+#' @param setA FunctionalAnnotationChart to compare
+#' @param setB FunctionalAnnotationChart to compare
+#' @param keggTerm If a specific KEGG pathway is of interest, input the name here; otherwise,
+#' the most differentially expressed pathway will be used.
+#' @param species The program can usually figure out the species from the KEGG terms, but if
+#' it can't, supply the species ID here. From pathview vignette, 
+#' run 'data(bods); bods' to find species codes.
+#' @param workingDir The directory to output into. Recommended, since pathview 
+#' will put a few different files there each time.
+#' @param sortByCount Set TRUE if you want the function to automatically choose the pathway
+#' with the most number of genes
+#' @param ... Arguments to be passed to pathview
+#' @export
+#' @return Output from pathview: a list of 2, plot.data.gene and plot.data.cpd
+#' @examples
+#' \dontrun{
+#' # Since this function requires writing to a directory, it won't be run here
+#' data(funChart1)
+#' data(funChart2)
+#' viewKegg(funChart1, funChart2)
+#' }
+viewKegg <- function(setA, setB, keggTerm = NULL, species = NULL, workingDir = NULL,
+    sortByCount = FALSE, ...) {
+    nameA = deparse(substitute(setA))
+    nameB = deparse(substitute(setB))
+    i = sapply(setA, is.factor)
+    setA[i] = lapply(setA[i], as.character)
+    i = sapply(setB, is.factor)
+    setB[i] = lapply(setB[i], as.character)
+
+    setA = subset(setA, setA$Category == "KEGG_PATHWAY")
+    setB = subset(setB, setB$Category == "KEGG_PATHWAY")
+
+    # one common and at least 4 each seems to work well
+    z.comp = compareZscores(setA, setB, cutoff = 5)
+    # sort by absolute difference
+    z.comp = z.comp[with(z.comp, order(-abs(ComparedZ))), ]
+
+    if(nrow(z.comp) < 1)
+        stop("No common KEGG pathways")
+
+    if(is.null(keggTerm)) {
+        if(sortByCount) {
+            setA = setA[with(setA, order(-Count)), ]
+            setB = setB[with(setB, order(-Count)), ]
+            keggTerm = intersect(setA$Term, setB$Term)[1]
+        } else {
+            keggTerm = z.comp[1,]$Term
+        }
+    }
+    # Convert from DAVID (KEGG_ID:KEGG_DESCRIPTION) to KEGG_ID only
+    keggTerm = sub("([^:]+):.*$", "\\1", keggTerm)
+    setA$Term = sub("([^:]+):.*$", "\\1", setA$Term)
+    setB$Term = sub("([^:]+):.*$", "\\1", setB$Term)
+    setA = subset(setA, setA$Term == keggTerm)
+    setB = subset(setB, setB$Term == keggTerm)
+
+    if(nrow(setA) != 1 || nrow(setB) != 1) {
+        stop(paste("Couldn't find matching kegg term for", keggTerm, sep=' '))
+    }
+    genesA = unlist(strsplit(setA$Genes, ', '))
+    genesB = unlist(strsplit(setB$Genes, ', '))
+    allGenes = union(genesA, genesB)
+    expressions = sapply(allGenes, function(x, genesA, genesB) {
+            if(x %in% genesA && x %in% genesB) {
+                return(0)
+            } else if (x %in% genesA) {
+                return(-1)
+            } else {
+                return(1)
+            }
+        }, genesA, genesB)
+    
+    if(is.null(species)) {
+        species = substr(keggTerm, 0, 3)
+    }
+    if(!is.null(workingDir)) {
+        currDir = getwd()
+        setwd(workingDir)
+    }
+    pv.out = pathview(gene.data = expressions, pathway.id = keggTerm,
+        species = species, kegg.native=T, mid = list(gene = "yellow", cpd="grey"),
+        out.suffix = paste(nameA, nameB, sep='.'), ...)
+    if(!is.null(workingDir)) {
+        setwd(currDir)
+    }
+    messages(head(z.comp))
+    return(pv.out)
+}
+
+#' @title Interactive plotting function for groups of GO terms
+#' @description Given a list of functional annotation charts and optionally an 
+#' output directory, this function can output dendrograms, PCA analysis plots and a
+#' correlation matrix to make large-scale comparisons easy.
+#' @param input A list of functional annotation charts.
+#' @param outDir The directory to save plots to.
+#' @param prefix The prefix to append to each file, if any.
+#' @param pdf If true, plots will be pdfs. If false, pngs.
+#' @export
+plotInteractive <- function(input, outDir = NULL, prefix = NULL, pdf = TRUE) {
+    if(class(input) != "list")
+        stop("input must be of type list")
+    stdin = file('stdin')
+    on.exit(close(stdin))
+
+    wd = getwd()
+    on.exit(setwd(wd))
+
+    if (is.null(outDir)) {
+        message("Where would you like to output the plots?")
+        newDir = readLines(stdin, 1)
+        if(file.exists(newDir)) {
+            setwd(newDir)
+        } else {
+            message(paste(newDir, "doesn't exist, create it? [YN]"))
+            resp = readLines(stdin, 1)
+            if(grepl("[Yy](es)*", resp)) {
+                dir.create(newDir)
+                setwd(newDir)
+            } else {
+                setwd(wd)
+                return
+            }
+        }
+    } else {
+        setwd(outDir)
+    }
+
+    # We now want to iterate through the list given as input, do Z score comparisons
+    z.merge = matrix()
+    for(i in 1:length(input)) {
+        if (i == 1) {
+            z.merge = doZtrans.single(input[[i]], name=names(input)[i])
+        } else {
+            z.merge.add = doZtrans.single(input[[i]], name=names(input)[i])
+            z.merge = merge(z.merge, z.merge.add, by="row.names")
+            row.names(z.merge) = z.merge$Row.names
+            z.merge = z.merge[,-1]
+        }
+        
+    }
+    #TODO: rename all x -> z.merge below
+    x = z.merge
+    id = sample(1:999999, 1)
+
+    while(TRUE) {
+        message("What would you like to do?\n\n1. Plot a dendrogram")
+        message("2. Plot PCA\n3. Plot a correlation matrix\n4. Exit")
+        sel = readLines(stdin, 1)
+        if(sel == 1) {
+            dis <- cor(abs(x), method="pearson")
+            dist.cor <- hclust(dist(1-dis), method="complete")
+            if(pdf) {
+                pdf(paste(prefix, id, "-dendro", ".pdf", sep=''))
+            } else {
+                png(paste(prefix, id, "-dendro", ".png", sep=''))
+            }
+            par(mfrow=c(1,1))
+            plot(dist.cor)
+            dev.off()
+            message(paste("Saved to ", prefix, id, "-dendro\n", sep=''))
+        } else if (sel == 2) {
+            pc <- pca(t(x), method="svd", center=TRUE, nPcs=ncol(x)-1)
+            #calculate variance explained by first 3 components:
+            var1.2 <- R2cum(pc)[2]*100
+            var2.3 <- ((R2cum(pc)[3]-R2cum(pc)[2])+(R2cum(pc)[2]-R2cum(pc)[1]))*100
+            var1.3 <- (R2cum(pc)[1]+(R2cum(pc)[3]-R2cum(pc)[2]))*100
+            pc.scores <- as.data.frame(scores(pc))
+            
+            if(pdf) {
+                pdf(paste(prefix, id, "-pca", ".pdf", sep=''))
+            } else {
+                png(paste(prefix, id, "-pca", ".png", sep=''))
+            }
+
+            par(mfrow=c(2,2))
+            plot(pc.scores[,1], pc.scores[,2], xlab="PC 1", ylab="PC 2", sub=paste(var1.2, "% of the variance explained", sep=""), main="PC 1 vs. PC 2")
+            text(pc.scores[,1], pc.scores[,2], colnames(x), cex=0.6, pos=4, col="red")
+            plot(pc.scores[,2], pc.scores[,3], xlab="PC 2", ylab="PC 3", sub=paste(var2.3, "% of the variance explained", sep=""), main="PC 2 vs. PC 3")
+            text(pc.scores[,2], pc.scores[,3], colnames(x), cex=0.6, pos=4, col="red")
+            plot(pc.scores[,1], pc.scores[,3], xlab="PC 1", ylab="PC 3", sub=paste(var1.3, "% of the variance explained", sep=""), main="PC 1 vs. PC 3")
+            text(pc.scores[,1], pc.scores[,3], colnames(x), cex=0.6, pos=4, col="red")
+            plot(pc, main="Cumulative Variance")
+            dev.off()
+            message(paste("Saved to ", prefix, id, "-pca\n", sep=''))
+        } else if (sel == 3) {
+            if(pdf) {
+                pdf(paste(prefix, id, "-cor", ".pdf", sep=''))
+            } else {
+                png(paste(prefix, id, "-cor", ".png", sep=''))
+            }
+            par(mfrow=c(1,1))          
+            dt = melt(cor(x), id=1)
+            g = ggplot(dt, aes(Var1, Var2)) + geom_tile(aes(fill=value))
+            plot(g)
+            dev.off()
+            message(paste("Saved to ", prefix, id, "-cor\n", sep=''))
+        } else if (sel == 4) {
+            break
+        } else {
+            message("Invalid selection.")
+        }
+    }    
+    setwd(wd)
+}
+
 #' @title Annotate .bed file to genes
 #' @description Wrapper for transcriptsByOverlaps(). Returns a GRanges with the gene and transcript ids associated with the input .bed regions. Sometimes it is necessary to expand the search window a bit, because not all .bed regions directly overlap with a transcription start site, so the 'window' parameter is provided to accomplish this.
 #' @param pathToBed The system path to a .bed file (directory + file name)
@@ -56,6 +274,7 @@ annotateBedFromDb <- function(pathToBed = NULL, gRanges = NULL, db = NULL, windo
 #' @param background If you want to perform enrichment against a specific background instead DAVID's default (whole genome), supply it here
 #' @param bgIdType If the background gene ID type is different from the gene list, enter it here
 #' @param bgListName If you want to give the background a name, enter it here
+#' @param getKEGG TRUE if you want to download KEGG pathway information as well as GO
 #' @return Returns a DAVIDFunctionalAnnotationChart after generating it by comparing the supplied gene list to the full
 #'      genome as a background
 #' @examples
@@ -70,7 +289,9 @@ annotateBedFromDb <- function(pathToBed = NULL, gRanges = NULL, db = NULL, windo
 #' david = DAVIDWebService$new(email = "your.registered@@email.com")
 #' fnAnot = getFnAnot_genome(entrezList, david = david)
 #' }
-getFnAnot_genome <- function(geneList, david = NULL, email = NULL, idType = "ENTREZ_GENE_ID", listName = "auto_list", count = 1L, PVal = 1, background = NULL, bgIdType = NULL, bgListName = NULL) {
+getFnAnot_genome <- function(geneList, david = NULL, email = NULL, 
+    idType = "ENTREZ_GENE_ID", listName = "auto_list", count = 1L, PVal = 1, 
+    background = NULL, bgIdType = NULL, bgListName = NULL, getKEGG = FALSE) {
     if (is.null(david) && !is.null(email)) {
         david <- RDAVIDWebService::DAVIDWebService$new(email = email)
     }
@@ -82,15 +303,22 @@ getFnAnot_genome <- function(geneList, david = NULL, email = NULL, idType = "ENT
     }
     message("uploading gene list...")
     addList(david, geneList, idType=idType, listType = "Gene", listName = listName)
-    setAnnotationCategories(david, c("GOTERM_BP_ALL", "GOTERM_MF_ALL", "GOTERM_CC_ALL"))
+    if(getKEGG) {
+        setAnnotationCategories(david, c("GOTERM_BP_ALL", "GOTERM_MF_ALL", 
+            "GOTERM_CC_ALL", "KEGG_PATHWAY"))
+    } else {
+        setAnnotationCategories(david, c("GOTERM_BP_ALL", "GOTERM_MF_ALL", "GOTERM_CC_ALL"))
+    }
     if (is.null(background)) {
 # to ensure genome-wide comparison
         setCurrentBackgroundPosition(david, 1)
     } else {
         message("uploading background...")
-        addList(david, background, idType = ifelse(is.null(bgIdType), idType, bgIdType), listName = ifelse(is.null(bgListName), "auto_bg", bgListName), listType = "Background")
+        addList(david, background, idType = ifelse(is.null(bgIdType), idType, bgIdType),
+            listName = ifelse(is.null(bgListName), "auto_bg", bgListName),
+            listType = "Background")
     }
-
+    message("Done uploading. Downloading fnAnot_chart...")
     fnAnot <- getFunctionalAnnotationChart(david, threshold=PVal, count=count)
     return(fnAnot)
 }
@@ -165,8 +393,6 @@ zTransformDirectory <- function(inputDir, cutoff=NULL, pattern = NULL, removeNA=
     return(z.merge)
 }
 
-# TODO: return.full : substitute DAVID p-value for z-score derived p-value.
-
 #' @title Z transform a single functional annotation chart from DAVID
 #' @description Decomposes each GO term in a functional annotation chart (returned from getFnAnot_genome()) to its Z-score. These tables can be merged for clustering
 #' @param x The functional annotation chart to apply the transformation to
@@ -196,6 +422,7 @@ doZtrans.single <- function(x, name) {
     return(df)
 }
 
+# TODO: may cut off column. Revisit.
 doZtrans.merge <- function(setA, setB) {
     nameA = deparse(substitute(setA))
     nameB = deparse(substitute(setB))
@@ -256,6 +483,90 @@ doJACCit <- function(x, it){#it = increment
     }
     return(matrix.jacc)#return the matrix for plotting
 }#end of function
+
+# function wants pre-merged table, i.e. two fnAnot charts merged on "Term"
+# accept two fnAnot charts as args instead
+# filters out any GO term with less than 10 genes associated, along with any terms
+# present in one fnAnot chart and not the other.
+# returns data.frame with cols term, z score of first, z score of second,
+# compared z scores, p-value of comparison.
+# a flag can also add columns for gene information: genes in setA, genes in setB, intersect.
+
+#' @title Compare the Z scores of individual GO terms between two input annotation charts
+#' @description Accepts two fnAnot charts as args, does z score and p value calculations
+#' on them and returns a data.frame with important data. A flag, geneInfo, is provided
+#' in case the user wants to get information about the intersection and union of genes
+#' corresponding to the individual GO terms. Importantly, this function does some implicit
+#' thresholding: only terms with a minimum of 'cutoff' genes are compared,
+#' and any term present in one list but not the other is discarded.
+#' @export
+#' @param setA FunctionalAnnotationChart to compare
+#' @param setB FunctionalAnnotationChart to compare
+#' @param geneInfo Whether to add gene intersection and union info to the data.frame
+#' @param cutoff The minimum number of genes to threshold terms by
+#' @return A data.frame with columns: Term, Zscore.A, Zscore.B, ComparedZ, Pvalue
+#' (optionally geneUnion, geneIntersect as well, which are comma-separated strings).
+#' @examples
+#' data(funChart1)
+#' data(funChart2)
+#' cz = compareZscores(funChart1, funChart2)
+#' str(cz)
+#' cz = compareZscores(funChart1, funChart2, geneInfo = TRUE)
+#' str(cz)
+compareZscores <- function(setA, setB, geneInfo = FALSE, cutoff = 10) {
+    if(!"Term" %in% names(setA) | !"Term" %in% names(setB))
+        stop("Please supply valid functional annotation charts as arguments")
+    i = sapply(setA, is.factor)
+    setA[i] = lapply(setA[i], as.character)
+    i = sapply(setB, is.factor)
+    setB[i] = lapply(setB[i], as.character)
+    setA = subset(setA, setA$Count >= cutoff)
+    setB = subset(setB, setB$Count >= cutoff)
+    # merged table
+    mt = merge(setA, setB, by="Term", all = FALSE)
+    # odds ratios
+    or.x = (mt$Count.x/mt$List.Total.x)/(mt$Pop.Hits.x/mt$Pop.Total.x)
+    or.y = (mt$Count.y/mt$List.Total.y)/(mt$Pop.Hits.y/mt$Pop.Total.y)
+    # std errors
+    ster.x = sqrt(1/mt$Count.x + 1/mt$List.Total.x + 1/mt$Pop.Hits.x +1/mt$Pop.Total.x)
+    ster.y = sqrt(1/mt$Count.y + 1/mt$List.Total.y + 1/mt$Pop.Hits.y +1/mt$Pop.Total.y)
+    # zscores
+    zscores = (log(or.x) - log(or.y))/sqrt((ster.x)^2 + (ster.y)^2)
+    z.pvals = 2*pnorm(-abs(zscores))
+    z.pv.adj= p.adjust(z.pvals, method="fdr")
+    z.x     = log(or.x)/ster.x
+    z.y     = log(or.y)/ster.y
+    # merge into data.frame
+    if(!geneInfo) {
+        result = data.frame("Term" = mt$Term, "Zscore.A" = z.x, 
+            "Zscore.B" = z.y, "ComparedZ" = zscores,
+            "Pvalue" = z.pvals, "PvalueAdj" = z.pv.adj)
+    } else {
+        # tricky gene stuff follows
+        # gets comma-separated genes as vector of strings,
+        # each of these strings is given name of initial term:
+        geneA = setA$Genes
+        names(geneA) = setA$Term
+        geneB = setB$Genes
+        names(geneB) = setB$Term
+        # split strings into genes
+        geneA = strsplit(geneA, ', ')
+        geneB = strsplit(geneB, ', ')
+        # get the conserved GO terms between the two sets
+        keys = unique(intersect(names(geneA), names(geneB)))
+        # currently, these are named lists of lists of genes.
+        # for each term, we want to find the intersection of the genes.
+        n = setNames(mapply(intersect, geneA[keys], geneB[keys]), keys)
+        u = setNames(mapply(union, geneA[keys], geneB[keys]), keys)
+        n = lapply(n, paste, collapse = ", ")
+        u = lapply(u, paste, collapse = ", ")
+        result = data.frame("Term" = mt$Term, "Zscore.A" = z.x, 
+            "Zscore.B" = z.y, "ComparedZ" = zscores, "Pvalue" = z.pvals, 
+            "geneUnion" = unlist(u), "geneIntersect" = unlist(n))
+    }
+    return(result)
+}
+
 
 extractPvalTable <- function(setA, setB, useRawPvals) {
     if(all(c("Category", "X.", "PValue", "Benjamini") %in% names(setA))) {
@@ -400,7 +711,8 @@ plotZScores <- function(setA, setB, cutoff = NULL, plotNA = FALSE, model='lm') {
 #' data(funChart1)
 #' data(funChart2)
 #' plotPairwise(funChart1, funChart2)
-plotPairwise <- function(setA, setB, cutoff = NULL, useRawPvals = FALSE, plotNA= TRUE, model='lm', ontology=NULL) {
+plotPairwise <- function(setA, setB, cutoff = NULL, useRawPvals = FALSE, 
+    plotNA= TRUE, model='lm', ontology=NULL) {
     if(!is.null(ontology)) {
         if(ontology %in% c("BP", "MF", "CC")) {
             setA = subOntology(setA, ontology)
@@ -507,6 +819,13 @@ extractGOFromAnnotation <- function(fnAnot) {
     return(fnAnot)
 }
 
+extractKEGGFromAnnotation <- function(fnAnot) {
+    fnAnot$Term = sapply(fnAnot$Term, function(x) {
+        sub("([^:]+):.*$", "\\1", x)
+    })
+    return(fnAnot)
+}
+
 #' @title Plots a directed acyclic graph of GO terms from two different sources
 #' @description Plots a directed acyclic graph of GO terms from two different sources, using colour to show intersection and difference. This is useful to see the specific functional differences between gene lists, complementing the overall metric of gene list similarity
 #' @param setA A DAVIDFunctionalAnnotationChart object
@@ -600,27 +919,50 @@ mergeFnAnotCharts = function(setA, setB) {
     return(setU)
 }
 
-plotRankedZDAG <- function (setA, setB, ont = "BP", n = 100, maxLabel = NULL, fullNames = TRUE, Pvalues = TRUE) {
+#' @title Plot a directed acyclic graph (DAG) based on the corrected Pvalues generated from
+#' comparing two sets of Z scores. 
+#' @description This function accepts two functional annotation charts as input, performs
+#' a comparison on them using compareZscores() and plots a DAG based on the results. The
+#' saturation of each node is computed based on the Pvalue, such that the more significant
+#' values are darker in colour.
+#' @export
+#' @param setA FunctionalAnnotationChart to compare
+#' @param setB FunctionalAnnotationChart to compare
+#' @param ont The gene ontology category for which to calculate enrichment
+#' @param n The number of top-ranked Pvalues to compare
+#' @param maxLabel The maximum number of characters in a node's label
+#' @param fullNames Whether to print the full GO term label or just the GO id
+#' @param Pvalues Whether to print P-values alongside each label
+#' @examples
+#' \dontrun{
+#' data(funChart1)
+#' data(funChart2)
+#' plotZRankedDAG(funChart1, funChart2, n = 50)
+#' }
+plotZRankedDAG <- function (setA, setB, ont = "BP", n = 100, maxLabel = NULL, 
+    fullNames = TRUE, Pvalues = TRUE) {
+    # Wish to plot DAG based on Z score comparisons (P-values thereof)
+    # Recall that the compare Z score function omits all NAs... I guess we can only do direct
+    # single-colour plots. 
+    # In this case, since DAVID needs an fnAnot chart, maybe cut down one of the input
+    # sets to those returned by the comparison function and replace the relevant info with
+    # that which has been generated?
 
-    i = sapply(setA, is.factor)
-    setA[i] = lapply(setA[i], as.character)
-    i = sapply(setB, is.factor)
-    setB[i] = lapply(setB[i], as.character)
+    compared = compareZscores(setA, setB, geneInfo=T)
+    compared = compared[order(compared$Pvalue),]
+    compared = compared[1:n,]
+    setU = setA
+    setU = subset(setU, setU$Term %in% compared$Term)
+    setU$PValue = compared$PvalueAdj
+    setU$Genes = compared$geneUnion
 
-    overlap  = intersect(setA$Term, setB$Term)
-    setBuniq = subset(setB, !setB$Term %in% overlap)
-
-    setU = merge(setA, setB, by = "Term", all = FALSE)
-# Perform OR/Z-score calculation here
-
-    setU = setU[with(setU, order(Z)), ]
-    setU = setU[1:n,]
+    setU = DAVIDFunctionalAnnotationChart(setU)
 
     if(ont %in% c("BP", "MF", "CC")) {
-        r = DAVIDGODag(setU, ont, cutoff)
+        r = DAVIDGODag(setU, ont, 1, removeUnattached= TRUE)
         g = goDag(r)
     } else {
-        stop("Please supply a valid ontology category")
+        stop("Please supply a valid ontology category (BP, MF or CC)")
     }
 
     n = nodes(g)
@@ -631,12 +973,14 @@ plotRankedZDAG <- function (setA, setB, ont = "BP", n = 100, maxLabel = NULL, fu
 
     if(fullNames && Pvalues) {
         nodeLabels = paste(names(unlist(nodeData(g, attr = "term"))), "~",
-            unlist(nodeData(g, attr = "term")),"\nP-value:", unlist(nodeData(g, attr="pvalue")), sep='')
+            unlist(nodeData(g, attr = "term")),"\nP-value:", 
+            unlist(nodeData(g, attr="pvalue")), sep='')
     } else if (fullNames) {
         nodeLabels = paste(names(unlist(nodeData(g, attr = "term"))), "~",
             unlist(nodeData(g, attr = "term")), sep="")
     } else if (Pvalues) {
-        nodeLabels = paste(names(unlist(nodeData(g, attr = "term"))), "\nP-value: ", unlist(nodeData(g, attr="pvalue")), sep='')
+        nodeLabels = paste(names(unlist(nodeData(g, attr = "term"))), 
+            "\nP-value: ", unlist(nodeData(g, attr="pvalue")), sep='')
     } else {
         nodeLabels = n
     }
@@ -646,18 +990,21 @@ plotRankedZDAG <- function (setA, setB, ont = "BP", n = 100, maxLabel = NULL, fu
         nodeLabels = sapply(nodeLabels, substr, 1L, maxLabel, USE.NAMES= FALSE)
     }
 
-    setU$Term = sub("~.*","",setU$Term)
+    setU$Term   = sub("~.*","",setU$Term)
 
-    nodeColours = ifelse(names(labels) %in% sub("~.*","",overlap), "yellow", ifelse(names(labels) %in% sub("~.*", "", setA$Term), "red",
-        ifelse(names(labels) %in% sub("~.*", "", setB$Term), "lightgreen", "black")))
-    nodeShapes = ifelse(names(labels) %in% sub("~.*", "", overlap), "rectangle", ifelse(names(labels) %in% sub("~.*", "", setA$Term), "rectangle",
-        ifelse(names(labels) %in% sub("~.*", "", setB$Term), "rectangle", "plaintext")))
-    nodeFont = ifelse(names(labels) %in% sub("~.*", "", overlap), 16, ifelse(names(labels) %in% sub("~.*", "", setA$Term), 16,
-        ifelse(names(labels) %in% sub("~.*", "", setB$Term), 16, 0.1)))
-
-    nattr = makeNodeAttrs(g, label = nodeLabels, shape = nodeShapes, fillcolor = nodeColours, fixedsize= FALSE, fontsize=nodeFont)
+    # HSV not implemented in R, I guess.
+    # nodeColours = paste("0.000", ifelse(n %in% setU$Term, 
+    #     round(setU$PValue,3), 1), "1.000", sep=", ")
+    # Ugly Pvalue -> 0:255 -> hex conversion
+    gb = ifelse(n %in% setU$Term, sub(" ", "0", sprintf("%2x", 
+        floor(setU$PValue*255))), "ff")
+    gb = sprintf("%s%s", gb, gb)
+    nodeColours = paste("#ff", gb, sep='')
+    nodeShapes  = "rectangle"
+    nodeFont    = 16
+    nattr = makeNodeAttrs(g, label = nodeLabels, shape = nodeShapes,
+        fillcolor = nodeColours, fixedsize= FALSE, fontsize=nodeFont)
     x <- layoutGraph(g, nodeAttrs = nattr)
     nodeRenderInfo(x) <- list(fontsize=nattr$fontsize)
     renderGraph(x)
-    #plot(g, nodeAttrs = nattr)
 }
