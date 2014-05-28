@@ -115,6 +115,8 @@ viewKegg <- function(setA, setB, keggTerm = NULL, species = NULL, workingDir = N
 plotInteractive <- function(input, outDir = NULL, prefix = NULL, pdf = TRUE) {
     if(class(input) != "list")
         stop("input must be of type list")
+    if(!"Term" %in% names(input[[1]]))
+        stop("Please supply valid functional annotation charts as list members")
     stdin = file('stdin')
     on.exit(close(stdin))
 
@@ -217,6 +219,64 @@ plotInteractive <- function(input, outDir = NULL, prefix = NULL, pdf = TRUE) {
         }
     }    
     setwd(wd)
+}
+
+#' @title Plot dendrogram given an input list of fnAnot charts
+#' @description Given a list of functional annotation charts, 
+#' this function outputs a dendrogram
+#' @param input A list of functional annotation charts.
+#' @export
+plotDendrogram <- function(input) {
+    z.merge = matrix()
+    for(i in 1:length(input)) {
+        if (i == 1) {
+            z.merge = doZtrans.single(input[[i]], name=names(input)[i])
+        } else {
+            z.merge.add = doZtrans.single(input[[i]], name=names(input)[i])
+            z.merge = merge(z.merge, z.merge.add, by="row.names")
+            row.names(z.merge) = z.merge$Row.names
+            z.merge = z.merge[,-1]
+        }   
+    }
+    x = z.merge
+    dis <- cor(abs(x), method="pearson")
+    dist.cor <- hclust(dist(1-dis), method="complete")
+    plot(dist.cor)  
+}
+
+#' @title Plot PCA given an input list of fnAnot charts
+#' @description Given a list of functional annotation charts, 
+#' this function outputs a PCA plot
+#' @param input A list of functional annotation charts.
+#' @export
+plotPCA <-function(input) {
+    z.merge = matrix()
+    for(i in 1:length(input)) {
+        if (i == 1) {
+            z.merge = doZtrans.single(input[[i]], name=names(input)[i])
+        } else {
+            z.merge.add = doZtrans.single(input[[i]], name=names(input)[i])
+            z.merge = merge(z.merge, z.merge.add, by="row.names")
+            row.names(z.merge) = z.merge$Row.names
+            z.merge = z.merge[,-1]
+        }
+    }
+    x = z.merge
+    pc <- pca(t(x), method="svd", center=TRUE, nPcs=ncol(x)-1)
+    #calculate variance explained by first 3 components:
+    var1.2 <- R2cum(pc)[2]*100
+    var2.3 <- ((R2cum(pc)[3]-R2cum(pc)[2])+(R2cum(pc)[2]-R2cum(pc)[1]))*100
+    var1.3 <- (R2cum(pc)[1]+(R2cum(pc)[3]-R2cum(pc)[2]))*100
+    pc.scores <- as.data.frame(scores(pc))
+
+    par(mfrow=c(2,2))
+    plot(pc.scores[,1], pc.scores[,2], xlab="PC 1", ylab="PC 2", sub=paste(var1.2, "% of the variance explained", sep=""), main="PC 1 vs. PC 2")
+    text(pc.scores[,1], pc.scores[,2], colnames(x), cex=0.6, pos=4, col="red")
+    plot(pc.scores[,2], pc.scores[,3], xlab="PC 2", ylab="PC 3", sub=paste(var2.3, "% of the variance explained", sep=""), main="PC 2 vs. PC 3")
+    text(pc.scores[,2], pc.scores[,3], colnames(x), cex=0.6, pos=4, col="red")
+    plot(pc.scores[,1], pc.scores[,3], xlab="PC 1", ylab="PC 3", sub=paste(var1.3, "% of the variance explained", sep=""), main="PC 1 vs. PC 3")
+    text(pc.scores[,1], pc.scores[,3], colnames(x), cex=0.6, pos=4, col="red")
+    plot(pc, main="Cumulative Variance")
 }
 
 #' @title Annotate .bed file to genes
@@ -562,7 +622,7 @@ compareZscores <- function(setA, setB, geneInfo = FALSE, cutoff = 10) {
         u = lapply(u, paste, collapse = ", ")
         result = data.frame("Term" = mt$Term, "Zscore.A" = z.x, 
             "Zscore.B" = z.y, "ComparedZ" = zscores, "Pvalue" = z.pvals, 
-            "geneUnion" = unlist(u), "geneIntersect" = unlist(n))
+            "PvalueAdj" = z.pv.adj, "geneUnion" = unlist(u), "geneIntersect" = unlist(n))
     }
     return(result)
 }
@@ -953,7 +1013,7 @@ plotZRankedDAG <- function (setA, setB, ont = "BP", n = 100, maxLabel = NULL,
     compared = compared[1:n,]
     setU = setA
     setU = subset(setU, setU$Term %in% compared$Term)
-    setU$PValue = compared$PvalueAdj
+    setU$PValue = compared$Pvalue
     setU$Genes = compared$geneUnion
 
     setU = DAVIDFunctionalAnnotationChart(setU)
