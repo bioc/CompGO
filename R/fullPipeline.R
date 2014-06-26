@@ -99,7 +99,6 @@ viewKegg <- function(setA, setB, keggTerm = NULL, species = NULL, workingDir = N
     if(!is.null(workingDir)) {
         setwd(currDir)
     }
-    messages(head(z.comp))
     return(pv.out)
 }
 
@@ -249,7 +248,7 @@ plotDendrogram <- function(input) {
 #' this function outputs a PCA plot
 #' @param input A list of functional annotation charts.
 #' @export
-plotPCA <-function(input) {
+PCAplot <-function(input) {
     z.merge = matrix()
     for(i in 1:length(input)) {
         if (i == 1) {
