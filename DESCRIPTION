@@ -15,7 +15,7 @@ Version: 1.8.0
 Authors@R: c(person("Sam D.", "Bassett", role = 'aut',
     email='sam.d.bassett@gmail.com'),
     person("Ashley J.", "Waardenberg", role=c('aut', 'cre'),
-    email='awaardenberg@cmri.edu.au'))
+    email='awaardenberg@cmri.org.au'))
 License: GPL-2
 Depends:
     RDAVIDWebService
