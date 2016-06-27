@@ -1,16 +1,19 @@
 Package: CompGO
-Title: An R pipeline for .bed file annotation, comparing GO term enrichment
-    between gene sets and data visualisation
+Title: An R pipeline for .bed file annotation, statistical comparison of GO term
+    enrichment between gene sets and data visualisation
 Description: This package contains functions to accomplish several tasks. It is
     able to download full genome databases from UCSC, import .bed files easily,
     annotate these .bed file regions with genes (plus distance) from
     aforementioned database dumps, interface with DAVID to create functional
     annotation and gene ontology enrichment charts based on gene lists (such as
-    those generated from input .bed files) and finally visualise and compare
-    these enrichments using either directed acyclic graphs or scatterplots.
+    those generated from input .bed files), statistically compare gene ontology
+    enrichment between multiple experiments and finally visualise and compare
+    these enrichments using directed acyclic graphs or scatterplots. CompGO also
+    enables clustering of experiments based on their GO profiles and provides
+    functions for performing and visualising principle component analysis.
 Version: 1.8.0
 Authors@R: c(person("Sam D.", "Bassett", role = 'aut',
-    email='S.Bassett@victorchang.edu.au'),
+    email='sam.d.bassett@gmail.com'),
     person("Ashley J.", "Waardenberg", role=c('aut', 'cre'),
     email='awaardenberg@cmri.edu.au'))
 License: GPL-2
