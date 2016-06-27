@@ -12,7 +12,7 @@ Version: 1.8.0
 Authors@R: c(person("Sam D.", "Bassett", role = 'aut',
     email='S.Bassett@victorchang.edu.au'),
     person("Ashley J.", "Waardenberg", role=c('aut', 'cre'),
-    email='A.Waardenberg@victorchang.edu.au'))
+    email='awaardenberg@cmri.edu.au'))
 License: GPL-2
 Depends:
     RDAVIDWebService
