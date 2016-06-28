@@ -11,7 +11,7 @@ Description: This package contains functions to accomplish several tasks. It is
     these enrichments using directed acyclic graphs or scatterplots. CompGO also
     enables clustering of experiments based on their GO profiles and provides
     functions for performing and visualising principle component analysis.
-Version: 1.8.0
+Version: 1.8.1
 Authors@R: c(person("Sam D.", "Bassett", role = 'aut',
     email='sam.d.bassett@gmail.com'),
     person("Ashley J.", "Waardenberg", role=c('aut', 'cre'),
