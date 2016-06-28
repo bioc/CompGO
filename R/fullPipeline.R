@@ -352,7 +352,8 @@ getFnAnot_genome <- function(geneList, david = NULL, email = NULL,
     idType = "ENTREZ_GENE_ID", listName = "auto_list", count = 1L, PVal = 1, 
     background = NULL, bgIdType = NULL, bgListName = NULL, getKEGG = FALSE) {
     if (is.null(david) && !is.null(email)) {
-        david <- RDAVIDWebService::DAVIDWebService$new(email = email)
+        david <- RDAVIDWebService::DAVIDWebService$new(email = email, 
+        url="https://david.ncifcrf.gov/webservice/services/DAVIDWebService.DAVIDWebServiceHttpSoap12Endpoint/")
     }
     if(class(geneList) == "GRanges") {
         geneList = unique(unlist(as.character(geneList$gene_id)))
