@@ -29,3 +29,4 @@ Imports:
     reshape2,
     pathview
 biocViews: GeneSetEnrichment, MultipleComparison, GO, Visualization
+RoxygenNote: 5.0.1

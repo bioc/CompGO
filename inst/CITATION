@@ -1,0 +1,22 @@
+citHeader("To cite CompGO in publications use:")
+
+citEntry(entry = "Article",
+  title        = "{CompGO}: an {R} package for comparing and visualizing Gene Ontology enrichment differences between DNA binding experiments",
+  author       = personList(as.person("Ashley J. Waardenberg"),
+                   as.person("Samuel D. Bassett"),
+                   as.person("Romaric Bouveret"),
+                   as.person("Richard P. Harvey")
+                   ),
+  journal      = "BMC Bioinformatics",
+  year         = "2015",
+  volume       = "16",
+  pages        = "275",
+  url          = "http://bmcbioinformatics.biomedcentral.com/articles/10.1186/s12859-015-0701-2",
+
+  textVersion  =
+  paste("Ashley J. Waardenberg, Samuel D. Bassett, Romaric Bouveret, Richard P. Harvey (2015).",
+        "CompGO: an R package for comparing and visualizing Gene Ontology
+        enrichment differences between DNA binding experiments",
+        "BMC Bioinformatics, 16:275.",
+        "URL http://bmcbioinformatics.biomedcentral.com/articles/10.1186/s12859-015-0701-2.")
+)
